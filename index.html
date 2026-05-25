@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hikemage Trail Scrapbook</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260525" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Trail editor">
+        <header class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Hikemage</p>
+            <h1>Trail scrapbook</h1>
+          </div>
+        </header>
+
+        <section class="panel trail-panel" aria-labelledby="trail-details-title">
+          <div class="panel-heading">
+            <h2 id="trail-details-title">Trail details</h2>
+            <button class="ghost-button compact" id="sampleButton" type="button">
+              Sample
+            </button>
+          </div>
+
+          <label class="field">
+            <span>Trail name</span>
+            <input id="trailTitle" type="text" value="Sunday ridge wander" />
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Date</span>
+              <input id="trailDate" type="date" />
+            </label>
+            <label class="field">
+              <span>Mood</span>
+              <select id="trailMood">
+                <option value="Misty and peaceful">Misty and peaceful</option>
+                <option value="Sunny and bright">Sunny and bright</option>
+                <option value="Wild and windy">Wild and windy</option>
+                <option value="Golden hour">Golden hour</option>
+                <option value="Fresh pine air">Fresh pine air</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Trail notes</span>
+            <textarea
+              id="trailNotes"
+              rows="4"
+            >A little map of the route, the best views, and the tiny moments worth keeping.</textarea>
+          </label>
+        </section>
+
+        <section class="panel" aria-labelledby="route-tools-title">
+          <div class="panel-heading">
+            <h2 id="route-tools-title">Route</h2>
+            <output id="distanceOutput">0 mi / 0 km</output>
+          </div>
+
+          <div class="segmented" role="group" aria-label="Map mode">
+            <button class="mode-button is-active" data-mode="draw" type="button">
+              Draw
+            </button>
+            <button class="mode-button" data-mode="place" type="button">
+              Place photo
+            </button>
+            <button class="mode-button" data-mode="pan" type="button">
+              Explore
+            </button>
+          </div>
+
+          <div class="button-grid">
+            <button class="tool-button" id="undoPointButton" type="button">
+              Undo point
+            </button>
+            <button class="tool-button" id="clearRouteButton" type="button">
+              Clear route
+            </button>
+            <button class="tool-button" id="locateButton" type="button">
+              Find me
+            </button>
+            <button class="tool-button" id="importRouteButton" type="button">
+              Import route
+            </button>
+          </div>
+
+          <input id="gpxInput" type="file" accept=".gpx,application/gpx+xml,text/xml" hidden />
+          <p class="status-line" id="modeStatus">Draw mode ready.</p>
+        </section>
+
+        <section class="panel photos-panel" aria-labelledby="photos-title">
+          <div class="panel-heading">
+            <h2 id="photos-title">Photos</h2>
+            <output id="photoCountOutput">0 photos</output>
+          </div>
+
+          <button class="primary-button" id="addPhotosButton" type="button">
+            Add photos
+          </button>
+          <input id="photoInput" type="file" accept="image/*" multiple hidden />
+
+          <div class="photo-list" id="photoList" aria-live="polite"></div>
+        </section>
+
+        <section class="panel export-panel" aria-labelledby="export-title">
+          <div>
+            <h2 id="export-title">Share</h2>
+            <p class="mini-copy">
+              One HTML file with compressed photo copies and exact map points.
+            </p>
+          </div>
+          <button class="export-button" id="exportButton" type="button">
+            Export share page
+          </button>
+        </section>
+      </aside>
+
+      <main class="map-stage" aria-label="Trail map">
+        <div class="map-card">
+          <div id="map"></div>
+          <div class="floating-note" id="floatingNote">Click the map to start the trail.</div>
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </div>
+      </main>
+    </div>
+
+    <template id="photoItemTemplate">
+      <article class="photo-item">
+        <button class="photo-thumb" type="button" aria-label="Center photo on map">
+          <img alt="" />
+        </button>
+        <div class="photo-meta">
+          <div class="photo-row">
+            <strong class="photo-name"></strong>
+            <span class="photo-state"></span>
+          </div>
+          <input class="caption-input" type="text" placeholder="Caption" />
+          <div class="photo-actions">
+            <button class="mini-button place-photo" type="button">Place</button>
+            <button class="mini-button remove-photo" type="button">Remove</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/exifr/dist/full.umd.js"></script>
+    <script src="./app.js?v=20260525"></script>
+  </body>
+</html>
