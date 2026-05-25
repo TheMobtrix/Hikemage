@@ -4,8 +4,13 @@
   const tileAttribution =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
   const photonSearchUrl = "https://photon.komoot.io/api/";
-  const overpassApiUrl = "https://overpass-api.de/api/interpreter";
-  const trailSearchRadiusMeters = 25000;
+  const overpassApiUrls = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+  ];
+  const trailSearchRadiusMeters = 12000;
+  const overpassRequestTimeoutMs = 16000;
   const maxRoutePoints = 1400;
 
   const state = {
@@ -70,6 +75,7 @@
   }).addTo(map);
 
   const routePointLayer = L.layerGroup().addTo(map);
+  const placeLayer = L.layerGroup().addTo(map);
   const trailPreviewLayer = L.layerGroup().addTo(map);
   const photoLayer = L.layerGroup().addTo(map);
   const photoMarkers = new Map();
@@ -185,7 +191,8 @@
         return;
       }
 
-      setSearchStatus("Pick a place, then find nearby trails.");
+      selectPlace(state.placeResults[0], { quiet: true });
+      setSearchStatus("Pinned the best match. Pick another result or find nearby trails.");
     } catch (error) {
       console.error(error);
       setSearchStatus("Place search is not available right now.");
@@ -254,8 +261,9 @@
     });
   }
 
-  function selectPlace(place) {
+  function selectPlace(place, options = {}) {
     elements.placeSearchInput.value = shortLabel(place.name);
+    renderPlacePin(place);
 
     if (place.bbox) {
       map.fitBounds(place.bbox, {
@@ -267,12 +275,32 @@
     }
 
     setMode("pan", { silent: true });
-    setSearchStatus("Place loaded. Tap Find trails nearby.");
-    showToast("Place found.");
+    setSearchStatus("Place pinned. Tap Find trails nearby.");
+    if (!options.quiet) {
+      showToast("Place pinned.");
+    }
+  }
+
+  function renderPlacePin(place) {
+    placeLayer.clearLayers();
+    L.marker([place.lat, place.lng], {
+      icon: L.divIcon({
+        className: "",
+        iconSize: [42, 52],
+        iconAnchor: [21, 48],
+        popupAnchor: [0, -44],
+        html: '<div class="place-pin" aria-hidden="true"></div>',
+      }),
+      title: place.name,
+    })
+      .bindPopup(`<strong>${escapeHtml(place.name)}</strong>`)
+      .addTo(placeLayer)
+      .openPopup();
   }
 
   async function searchNearbyTrails() {
     const center = map.getCenter();
+    const bounds = trailSearchBounds(center);
     const term = normalizeText(elements.trailSearchInput.value);
     const radiusMiles = trailSearchRadiusMeters / 1609.344;
 
@@ -281,25 +309,18 @@
     setSearchStatus(`Looking for trails within ${radiusMiles.toFixed(0)} mi...`);
 
     try {
-      const query = buildTrailSearchQuery(center.lat, center.lng);
-      const response = await fetch(overpassApiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Trail search failed with ${response.status}.`);
-      }
-
-      const payload = await response.json();
+      const query = buildTrailSearchQuery(bounds);
+      const payload = await fetchOverpassPayload(query);
       const results = (payload.elements || [])
         .map((element) => toTrailResult(element, center))
         .filter((trail) => trail && trail.points.length > 1)
         .filter((trail) => !term || normalizeText(trail.name).includes(term))
-        .sort((a, b) => a.distanceFromCenter - b.distanceFromCenter)
+        .sort((a, b) => {
+          if (a.isNamed !== b.isNamed) {
+            return a.isNamed ? -1 : 1;
+          }
+          return a.distanceFromCenter - b.distanceFromCenter;
+        })
         .slice(0, 10);
 
       state.trailResults = dedupeTrailResults(results);
@@ -310,7 +331,7 @@
         setSearchStatus(
           term
             ? "No matching trails found nearby. Try clearing the filter."
-            : "No named trails found nearby. Try another place or zoom closer."
+            : "No trail lines found nearby. Try another place or zoom closer."
         );
         return;
       }
@@ -325,30 +346,79 @@
     }
   }
 
-  function buildTrailSearchQuery(lat, lng) {
-    const radius = trailSearchRadiusMeters;
+  async function fetchOverpassPayload(query) {
+    let lastError = null;
+
+    for (const endpoint of overpassApiUrls) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), overpassRequestTimeoutMs);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            Accept: "application/json",
+          },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`${endpoint} returned ${response.status}.`);
+        }
+
+        return await response.json();
+      } catch (error) {
+        lastError = error;
+        console.warn("Overpass endpoint failed", endpoint, error);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    throw lastError || new Error("No Overpass endpoint responded.");
+  }
+
+  function buildTrailSearchQuery(bounds) {
+    const bbox = [
+      bounds.south,
+      bounds.west,
+      bounds.north,
+      bounds.east,
+    ].join(",");
+
     return `
 [out:json][timeout:25];
 (
-  relation(around:${radius},${lat},${lng})["type"="route"]["route"~"hiking|foot"]["name"];
-  way(around:${radius},${lat},${lng})["highway"~"path|footway|track"]["name"];
+  relation["type"="route"]["route"~"hiking|foot|walking"](${bbox});
+  way["highway"="path"](${bbox});
+  way["highway"="footway"](${bbox});
+  way["highway"="track"](${bbox});
+  way["highway"="bridleway"](${bbox});
+  way["highway"="steps"](${bbox});
 );
-out tags center geom 60;
+out body geom 160;
 `;
   }
 
   function toTrailResult(element, center) {
-    const points = extractTrailPoints(element);
     const tags = element.tags || {};
-    const name = tags.name || tags.ref || "Unnamed trail";
+    if (isBlockedTrail(tags)) {
+      return null;
+    }
 
-    if (name === "Unnamed trail" || points.length < 2) {
+    const points = extractTrailPoints(element);
+    const name = trailDisplayName(element);
+
+    if (points.length < 2) {
       return null;
     }
 
     return {
       id: `${element.type}-${element.id}`,
       name,
+      isNamed: hasTrailName(element),
       kind: formatTrailKind(element),
       points: limitRoutePoints(points),
       distance: formatDistance(polylineDistanceMiles(points)),
@@ -379,7 +449,9 @@ out tags center geom 60;
   function dedupeTrailResults(results) {
     const seen = new Set();
     return results.filter((trail) => {
-      const key = normalizeText(trail.name);
+      const key = trail.name.startsWith("Trail segment")
+        ? trail.id
+        : normalizeText(trail.name);
       if (seen.has(key)) {
         return false;
       }
@@ -988,6 +1060,20 @@ out tags center geom 60;
     return haversineMiles([center.lat, center.lng], middle);
   }
 
+  function trailSearchBounds(center) {
+    const latDelta = trailSearchRadiusMeters / 111320;
+    const lngDelta =
+      trailSearchRadiusMeters /
+      (111320 * Math.max(0.2, Math.cos(degreesToRadians(center.lat))));
+
+    return {
+      south: clamp(center.lat - latDelta, -89.9, 89.9).toFixed(6),
+      west: wrapLongitude(center.lng - lngDelta).toFixed(6),
+      north: clamp(center.lat + latDelta, -89.9, 89.9).toFixed(6),
+      east: wrapLongitude(center.lng + lngDelta).toFixed(6),
+    };
+  }
+
   function routeDistanceMiles() {
     return polylineDistanceMiles(state.route);
   }
@@ -1396,6 +1482,42 @@ out tags center geom 60;
     return pieces.join(" - ");
   }
 
+  function isBlockedTrail(tags) {
+    const blocked = /^(private|no)$/i;
+    return blocked.test(tags.access || "") || blocked.test(tags.foot || "");
+  }
+
+  function hasTrailName(element) {
+    const tags = element.tags || {};
+    return Boolean(
+      tags.name ||
+        tags.official_name ||
+        tags.ref ||
+        tags["trailblazed:name"] ||
+        tags.operator
+    );
+  }
+
+  function trailDisplayName(element) {
+    const tags = element.tags || {};
+    const name =
+      tags.name ||
+      tags.official_name ||
+      tags.ref ||
+      tags["trailblazed:name"] ||
+      tags.operator;
+
+    if (name) {
+      return name;
+    }
+
+    if (tags.highway) {
+      return `${capitalize(tags.highway)} segment ${element.id}`;
+    }
+
+    return `Trail segment ${element.id}`;
+  }
+
   function formatPhotonPlaceName(properties) {
     const parts = [
       properties.name,
@@ -1429,6 +1551,20 @@ out tags center geom 60;
 
   function degreesToRadians(value) {
     return (value * Math.PI) / 180;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function wrapLongitude(value) {
+    if (value < -180) {
+      return value + 360;
+    }
+    if (value > 180) {
+      return value - 360;
+    }
+    return value;
   }
 
   function isFiniteNumber(value) {

@@ -20,13 +20,14 @@ so the browser needs internet access for the real map and photo GPS metadata too
 ## Find Places And Trails
 
 1. Search for a place, park, mountain, or trailhead in the `Find` panel.
-2. Tap `Go here` to move the map to that area.
+2. The best match is pinned automatically, or tap `Go here` on another result.
 3. Tap `Find trails nearby` to search for named hiking/foot routes around the
    current map center.
 4. Preview a trail, then tap `Use trail` to copy it into your route.
 
 Place search uses the public Photon OpenStreetMap-based geocoder. Nearby trail
-search uses the public Overpass API. Keep searches human-triggered and light.
+search uses public Overpass API endpoints with fallback. Keep searches
+human-triggered and light.
 
 ## Share A Hike
 
