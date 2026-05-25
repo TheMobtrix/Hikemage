@@ -17,6 +17,17 @@ so the browser needs internet access for the real map and photo GPS metadata too
 5. Photos without GPS metadata can be placed manually by tapping `Place photo`
    and then tapping the map.
 
+## Find Places And Trails
+
+1. Search for a place, park, mountain, or trailhead in the `Find` panel.
+2. Tap `Go here` to move the map to that area.
+3. Tap `Find trails nearby` to search for named hiking/foot routes around the
+   current map center.
+4. Preview a trail, then tap `Use trail` to copy it into your route.
+
+Place search uses the public Photon OpenStreetMap-based geocoder. Nearby trail
+search uses the public Overpass API. Keep searches human-triggered and light.
+
 ## Share A Hike
 
 1. Draw or import your route.

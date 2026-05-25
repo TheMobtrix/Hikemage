@@ -3,12 +3,19 @@
   const tileLayerUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
   const tileAttribution =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  const photonSearchUrl = "https://photon.komoot.io/api/";
+  const overpassApiUrl = "https://overpass-api.de/api/interpreter";
+  const trailSearchRadiusMeters = 25000;
+  const maxRoutePoints = 1400;
 
   const state = {
     mode: "draw",
     selectedPhotoId: null,
+    selectedTrailId: null,
     route: [],
     photos: [],
+    placeResults: [],
+    trailResults: [],
   };
 
   const elements = {
@@ -18,6 +25,13 @@
     trailNotes: document.querySelector("#trailNotes"),
     distanceOutput: document.querySelector("#distanceOutput"),
     photoCountOutput: document.querySelector("#photoCountOutput"),
+    placeSearchInput: document.querySelector("#placeSearchInput"),
+    placeSearchButton: document.querySelector("#placeSearchButton"),
+    placeResults: document.querySelector("#placeResults"),
+    trailSearchInput: document.querySelector("#trailSearchInput"),
+    findTrailsButton: document.querySelector("#findTrailsButton"),
+    trailResults: document.querySelector("#trailResults"),
+    searchStatus: document.querySelector("#searchStatus"),
     photoList: document.querySelector("#photoList"),
     photoTemplate: document.querySelector("#photoItemTemplate"),
     photoInput: document.querySelector("#photoInput"),
@@ -56,6 +70,7 @@
   }).addTo(map);
 
   const routePointLayer = L.layerGroup().addTo(map);
+  const trailPreviewLayer = L.layerGroup().addTo(map);
   const photoLayer = L.layerGroup().addTo(map);
   const photoMarkers = new Map();
 
@@ -65,6 +80,20 @@
   });
 
   elements.addPhotosButton.addEventListener("click", () => elements.photoInput.click());
+  elements.placeSearchButton.addEventListener("click", searchPlaces);
+  elements.findTrailsButton.addEventListener("click", searchNearbyTrails);
+  elements.placeSearchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchPlaces();
+    }
+  });
+  elements.trailSearchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchNearbyTrails();
+    }
+  });
   elements.photoInput.addEventListener("change", handlePhotoFiles);
   elements.importRouteButton.addEventListener("click", () => elements.gpxInput.click());
   elements.gpxInput.addEventListener("change", handleGpxFile);
@@ -87,6 +116,8 @@
     const point = [event.latlng.lat, event.latlng.lng];
 
     if (state.mode === "draw") {
+      state.selectedTrailId = null;
+      clearTrailPreview();
       state.route.push(point);
       refreshRoute();
       refreshFloatingNote();
@@ -109,6 +140,343 @@
       refreshFloatingNote();
       showToast("Photo placed on the trail.");
     }
+  }
+
+  async function searchPlaces() {
+    const query = elements.placeSearchInput.value.trim();
+
+    if (!query) {
+      setSearchStatus("Type a town, park, mountain, or trailhead first.");
+      showToast("Type a place to search.");
+      return;
+    }
+
+    setSearchBusy(true);
+    setSearchStatus("Searching places...");
+
+    try {
+      const center = map.getCenter();
+      const url = new URL(photonSearchUrl);
+      url.searchParams.set("q", query);
+      url.searchParams.set("limit", "6");
+      url.searchParams.set("lang", "en");
+      url.searchParams.set("lat", String(center.lat));
+      url.searchParams.set("lon", String(center.lng));
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Place search failed with ${response.status}.`);
+      }
+
+      const payload = await response.json();
+      state.placeResults = (payload.features || [])
+        .map((feature, index) => toPlaceResult(feature, index))
+        .filter(Boolean);
+
+      renderPlaceResults();
+
+      if (!state.placeResults.length) {
+        setSearchStatus("No places found. Try a wider name like the park or town.");
+        return;
+      }
+
+      setSearchStatus("Pick a place, then find nearby trails.");
+    } catch (error) {
+      console.error(error);
+      setSearchStatus("Place search is not available right now.");
+      showToast("Place search could not load.");
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  function toPlaceResult(feature, index) {
+    const properties = feature.properties || {};
+    const coordinates = feature.geometry && feature.geometry.coordinates;
+    const lng = Array.isArray(coordinates) ? Number(coordinates[0]) : NaN;
+    const lat = Array.isArray(coordinates) ? Number(coordinates[1]) : NaN;
+    const box = Array.isArray(properties.extent)
+      ? properties.extent.map(Number)
+      : null;
+
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      return null;
+    }
+
+    const lats = box && box.length === 4 ? [box[1], box[3]].filter(isFiniteNumber) : [];
+    const lngs = box && box.length === 4 ? [box[0], box[2]].filter(isFiniteNumber) : [];
+
+    return {
+      id: `place-${index}-${lat}-${lng}`,
+      name: formatPhotonPlaceName(properties),
+      type: [properties.osm_value, properties.osm_key].filter(Boolean).join(" / ") || "Place",
+      lat,
+      lng,
+      bbox: lats.length === 2 && lngs.length === 2
+        ? [
+            [Math.min(...lats), Math.min(...lngs)],
+            [Math.max(...lats), Math.max(...lngs)],
+          ]
+        : null,
+    };
+  }
+
+  function renderPlaceResults() {
+    elements.placeResults.innerHTML = "";
+
+    state.placeResults.forEach((place) => {
+      const card = document.createElement("article");
+      const title = document.createElement("div");
+      const detail = document.createElement("div");
+      const actions = document.createElement("div");
+      const goButton = document.createElement("button");
+
+      card.className = "result-card";
+      title.className = "result-title";
+      detail.className = "result-detail";
+      actions.className = "result-actions";
+      goButton.className = "mini-button";
+      goButton.type = "button";
+
+      title.textContent = place.name;
+      detail.textContent = place.type;
+      goButton.textContent = "Go here";
+      goButton.addEventListener("click", () => selectPlace(place));
+
+      actions.appendChild(goButton);
+      card.append(title, detail, actions);
+      elements.placeResults.appendChild(card);
+    });
+  }
+
+  function selectPlace(place) {
+    elements.placeSearchInput.value = shortLabel(place.name);
+
+    if (place.bbox) {
+      map.fitBounds(place.bbox, {
+        padding: [48, 48],
+        maxZoom: 13,
+      });
+    } else {
+      map.setView([place.lat, place.lng], 13);
+    }
+
+    setMode("pan", { silent: true });
+    setSearchStatus("Place loaded. Tap Find trails nearby.");
+    showToast("Place found.");
+  }
+
+  async function searchNearbyTrails() {
+    const center = map.getCenter();
+    const term = normalizeText(elements.trailSearchInput.value);
+    const radiusMiles = trailSearchRadiusMeters / 1609.344;
+
+    clearTrailPreview();
+    setSearchBusy(true);
+    setSearchStatus(`Looking for trails within ${radiusMiles.toFixed(0)} mi...`);
+
+    try {
+      const query = buildTrailSearchQuery(center.lat, center.lng);
+      const response = await fetch(overpassApiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Trail search failed with ${response.status}.`);
+      }
+
+      const payload = await response.json();
+      const results = (payload.elements || [])
+        .map((element) => toTrailResult(element, center))
+        .filter((trail) => trail && trail.points.length > 1)
+        .filter((trail) => !term || normalizeText(trail.name).includes(term))
+        .sort((a, b) => a.distanceFromCenter - b.distanceFromCenter)
+        .slice(0, 10);
+
+      state.trailResults = dedupeTrailResults(results);
+      state.selectedTrailId = null;
+      renderTrailResults();
+
+      if (!state.trailResults.length) {
+        setSearchStatus(
+          term
+            ? "No matching trails found nearby. Try clearing the filter."
+            : "No named trails found nearby. Try another place or zoom closer."
+        );
+        return;
+      }
+
+      setSearchStatus("Pick a trail to preview or use it as your route.");
+    } catch (error) {
+      console.error(error);
+      setSearchStatus("Trail search is not available right now.");
+      showToast("Trail search could not load.");
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  function buildTrailSearchQuery(lat, lng) {
+    const radius = trailSearchRadiusMeters;
+    return `
+[out:json][timeout:25];
+(
+  relation(around:${radius},${lat},${lng})["type"="route"]["route"~"hiking|foot"]["name"];
+  way(around:${radius},${lat},${lng})["highway"~"path|footway|track"]["name"];
+);
+out tags center geom 60;
+`;
+  }
+
+  function toTrailResult(element, center) {
+    const points = extractTrailPoints(element);
+    const tags = element.tags || {};
+    const name = tags.name || tags.ref || "Unnamed trail";
+
+    if (name === "Unnamed trail" || points.length < 2) {
+      return null;
+    }
+
+    return {
+      id: `${element.type}-${element.id}`,
+      name,
+      kind: formatTrailKind(element),
+      points: limitRoutePoints(points),
+      distance: formatDistance(polylineDistanceMiles(points)),
+      distanceFromCenter: distanceFromMapCenter(points, center),
+    };
+  }
+
+  function extractTrailPoints(element) {
+    if (Array.isArray(element.geometry) && element.geometry.length) {
+      return geometryToPoints(element.geometry);
+    }
+
+    if (Array.isArray(element.members)) {
+      return element.members
+        .filter((member) => Array.isArray(member.geometry))
+        .flatMap((member) => geometryToPoints(member.geometry));
+    }
+
+    return [];
+  }
+
+  function geometryToPoints(geometry) {
+    return geometry
+      .map((point) => [Number(point.lat), Number(point.lon)])
+      .filter(([lat, lng]) => isFiniteNumber(lat) && isFiniteNumber(lng));
+  }
+
+  function dedupeTrailResults(results) {
+    const seen = new Set();
+    return results.filter((trail) => {
+      const key = normalizeText(trail.name);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function renderTrailResults() {
+    elements.trailResults.innerHTML = "";
+
+    state.trailResults.forEach((trail) => {
+      const card = document.createElement("article");
+      const title = document.createElement("div");
+      const detail = document.createElement("div");
+      const actions = document.createElement("div");
+      const previewButton = document.createElement("button");
+      const useButton = document.createElement("button");
+
+      card.className = "result-card";
+      card.classList.toggle("is-selected", state.selectedTrailId === trail.id);
+      title.className = "result-title";
+      detail.className = "result-detail";
+      actions.className = "result-actions";
+      previewButton.className = "mini-button";
+      useButton.className = "mini-button";
+      previewButton.type = "button";
+      useButton.type = "button";
+
+      title.textContent = trail.name;
+      detail.textContent = `${trail.kind} - ${trail.distance}`;
+      previewButton.textContent = "Preview";
+      useButton.textContent = "Use trail";
+
+      previewButton.addEventListener("click", () => previewTrail(trail.id));
+      useButton.addEventListener("click", () => useTrail(trail.id));
+
+      actions.append(previewButton, useButton);
+      card.append(title, detail, actions);
+      elements.trailResults.appendChild(card);
+    });
+  }
+
+  function previewTrail(id) {
+    const trail = state.trailResults.find((item) => item.id === id);
+    if (!trail) {
+      return;
+    }
+
+    state.selectedTrailId = id;
+    clearTrailPreview();
+    L.polyline(trail.points, {
+      color: "#b75f69",
+      weight: 6,
+      opacity: 0.82,
+      dashArray: "8 8",
+      lineCap: "round",
+      lineJoin: "round",
+    }).addTo(trailPreviewLayer);
+    fitPointsToMap(trail.points, 15);
+    renderTrailResults();
+    setSearchStatus("Previewing trail. Tap Use trail to copy it into your route.");
+  }
+
+  function useTrail(id) {
+    const trail = state.trailResults.find((item) => item.id === id);
+    if (!trail) {
+      return;
+    }
+
+    state.route = trail.points;
+    state.selectedTrailId = trail.id;
+    clearTrailPreview();
+
+    if (!elements.trailTitle.value.trim() || elements.trailTitle.value === "Sunday ridge wander") {
+      elements.trailTitle.value = trail.name;
+    }
+
+    refreshRoute();
+    fitMapToContent();
+    setMode("pan", { silent: true });
+    refreshFloatingNote();
+    setSearchStatus(`${trail.name} is now your route.`);
+    showToast("Trail added to route.");
+  }
+
+  function clearTrailPreview() {
+    trailPreviewLayer.clearLayers();
+  }
+
+  function setSearchStatus(message) {
+    elements.searchStatus.textContent = message;
+  }
+
+  function setSearchBusy(isBusy) {
+    elements.placeSearchButton.disabled = isBusy;
+    elements.findTrailsButton.disabled = isBusy;
   }
 
   async function handlePhotoFiles(event) {
@@ -234,6 +602,8 @@
         }
 
         state.route = points;
+        state.selectedTrailId = null;
+        clearTrailPreview();
         refreshRoute();
         fitMapToContent();
         setMode("pan");
@@ -289,6 +659,8 @@
     }
 
     state.route = [];
+    state.selectedTrailId = null;
+    clearTrailPreview();
     refreshRoute();
     refreshFloatingNote();
     showToast("Route cleared.");
@@ -338,6 +710,8 @@
       [54.466, -3.096],
       [54.461, -3.093],
     ];
+    state.selectedTrailId = null;
+    clearTrailPreview();
 
     elements.trailTitle.value = "Borrowdale ridge loop";
     elements.trailMood.value = "Misty and peaceful";
@@ -376,14 +750,21 @@
     routePointLayer.clearLayers();
 
     state.route.forEach((point, index) => {
+      const isFirst = index === 0;
+      const isLast = index === state.route.length - 1;
+      const markerStep = Math.max(1, Math.ceil(state.route.length / 80));
+      if (!isFirst && !isLast && index % markerStep !== 0) {
+        return;
+      }
+
       const marker = L.circleMarker(point, {
-        radius: index === 0 ? 7 : 5,
+        radius: isFirst || isLast ? 7 : 5,
         color: "#fff",
         weight: 2,
-        fillColor: index === 0 ? "#b75f69" : "#356c55",
+        fillColor: isFirst ? "#b75f69" : isLast ? "#e5b85c" : "#356c55",
         fillOpacity: 1,
       });
-      marker.bindTooltip(index === 0 ? "Start" : `Point ${index + 1}`);
+      marker.bindTooltip(isFirst ? "Start" : isLast ? "End" : `Point ${index + 1}`);
       routePointLayer.addLayer(marker);
     });
 
@@ -562,12 +943,53 @@
     });
   }
 
-  function routeDistanceMiles() {
+  function fitPointsToMap(points, maxZoom = 15) {
+    if (!points.length) {
+      return;
+    }
+
+    map.fitBounds(L.latLngBounds(points), {
+      padding: [48, 48],
+      maxZoom,
+    });
+  }
+
+  function limitRoutePoints(points) {
+    if (points.length <= maxRoutePoints) {
+      return points;
+    }
+
+    const step = Math.ceil(points.length / maxRoutePoints);
+    const sampled = points.filter((_, index) => index % step === 0);
+    const last = points[points.length - 1];
+    const sampledLast = sampled[sampled.length - 1];
+
+    if (sampledLast && (sampledLast[0] !== last[0] || sampledLast[1] !== last[1])) {
+      sampled.push(last);
+    }
+
+    return sampled;
+  }
+
+  function polylineDistanceMiles(points) {
     let total = 0;
-    for (let index = 1; index < state.route.length; index += 1) {
-      total += haversineMiles(state.route[index - 1], state.route[index]);
+    for (let index = 1; index < points.length; index += 1) {
+      total += haversineMiles(points[index - 1], points[index]);
     }
     return total;
+  }
+
+  function distanceFromMapCenter(points, center) {
+    if (!points.length) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const middle = points[Math.floor(points.length / 2)];
+    return haversineMiles([center.lat, center.lng], middle);
+  }
+
+  function routeDistanceMiles() {
+    return polylineDistanceMiles(state.route);
   }
 
   function haversineMiles(a, b) {
@@ -953,6 +1375,56 @@
     showToast.timeoutId = setTimeout(() => {
       elements.toast.classList.remove("is-visible");
     }, 2600);
+  }
+
+  function formatTrailKind(element) {
+    const tags = element.tags || {};
+    const pieces = [];
+
+    if (tags.route) {
+      pieces.push(`${capitalize(tags.route)} route`);
+    } else if (tags.highway) {
+      pieces.push(capitalize(tags.highway));
+    } else {
+      pieces.push("Trail");
+    }
+
+    if (tags.network) {
+      pieces.push(tags.network.toUpperCase());
+    }
+
+    return pieces.join(" - ");
+  }
+
+  function formatPhotonPlaceName(properties) {
+    const parts = [
+      properties.name,
+      properties.city || properties.county || properties.state,
+      properties.country,
+    ].filter(Boolean);
+    const unique = parts.filter((part, index) => parts.indexOf(part) === index);
+    return unique.join(", ") || "Unnamed place";
+  }
+
+  function shortLabel(value) {
+    return String(value || "")
+      .split(",")
+      .slice(0, 3)
+      .join(",")
+      .trim();
+  }
+
+  function normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function capitalize(value) {
+    const text = String(value || "").replace(/_/g, " ");
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   function degreesToRadians(value) {

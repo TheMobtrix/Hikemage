@@ -179,6 +179,16 @@ output {
   font-weight: 750;
 }
 
+.quiet-tag {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--pine-dark);
+  background: rgba(121, 168, 138, 0.18);
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
 .field,
 .field span {
   display: block;
@@ -232,6 +242,44 @@ output {
   border-color: rgba(53, 108, 85, 0.72);
   box-shadow: 0 0 0 3px rgba(121, 168, 138, 0.2);
   background: #fff;
+}
+
+.result-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.result-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(40, 51, 47, 0.12);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.result-card.is-selected {
+  border-color: rgba(183, 95, 105, 0.52);
+  box-shadow: 0 0 0 3px rgba(242, 184, 168, 0.22);
+}
+
+.result-title {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.result-detail {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .field-grid {

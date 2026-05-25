@@ -8,7 +8,7 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260525" />
+    <link rel="stylesheet" href="./styles.css?v=20260525b" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,6 +60,46 @@
               rows="4"
             >A little map of the route, the best views, and the tiny moments worth keeping.</textarea>
           </label>
+        </section>
+
+        <section class="panel search-panel" aria-labelledby="find-tools-title">
+          <div class="panel-heading">
+            <h2 id="find-tools-title">Find</h2>
+            <span class="quiet-tag">OpenStreetMap</span>
+          </div>
+
+          <label class="field">
+            <span>Search place</span>
+            <input
+              id="placeSearchInput"
+              type="search"
+              placeholder="Lake District, Yosemite, Snowdon..."
+              autocomplete="off"
+            />
+          </label>
+
+          <div class="button-grid">
+            <button class="tool-button" id="placeSearchButton" type="button">
+              Search places
+            </button>
+            <button class="tool-button" id="findTrailsButton" type="button">
+              Find trails nearby
+            </button>
+          </div>
+
+          <label class="field">
+            <span>Trail name filter</span>
+            <input
+              id="trailSearchInput"
+              type="search"
+              placeholder="Optional, like ridge or waterfall"
+              autocomplete="off"
+            />
+          </label>
+
+          <p class="status-line" id="searchStatus">Search a place, then find nearby trails.</p>
+          <div class="result-list" id="placeResults" aria-live="polite"></div>
+          <div class="result-list" id="trailResults" aria-live="polite"></div>
         </section>
 
         <section class="panel" aria-labelledby="route-tools-title">
@@ -156,6 +196,6 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/exifr/dist/full.umd.js"></script>
-    <script src="./app.js?v=20260525"></script>
+    <script src="./app.js?v=20260525b"></script>
   </body>
 </html>
